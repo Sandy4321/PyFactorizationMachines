@@ -4,6 +4,7 @@ from collections import namedtuple
 import numpy as np
 import theano
 from theano import tensor as T
+from theano import sparse as S
 
 
 _Weights = namedtuple('_Weights', ['w0', 'w1', 'v'])
@@ -19,12 +20,16 @@ class _FactorizationMachine(object):
                  feature_count,
                  classifier=False,
                  k = 8,
-                 stdev = 0.1):
+                 stdev = 0.1,
+                 sparse = False):
         self.classifier = classifier
         d = feature_count
 
         # *** Symbolic variables ***
-        X = T.matrix()
+        if sparse:
+            X = S.csr_matrix(name='inputs', dtype='float32')
+        else:
+            X = T.matrix()
         y = T.vector()
         beta_w1 = T.scalar()
         beta_v = T.scalar()
@@ -44,9 +49,14 @@ class _FactorizationMachine(object):
         # The formula for pairwise interactions is from the bottom left
         # of page 997 of Rendle 2010, "Factorization Machines."
         # This version scales linearly in k and d, as opposed to O(d^2).
-        interactions = 0.5 * T.sum((T.dot(X, T.transpose(self.v)) ** 2) - \
-                                   T.dot(X ** 2, T.transpose(self.v ** 2)), axis=1)
-        y_hat = T.addbroadcast(self.w0,0) + T.dot(X, self.w1) + interactions
+        if sparse:
+            interactions = 0.5 * T.sum((S.dot(X, T.transpose(self.v)) ** 2) - \
+                                       S.dot(S.mul(X,X), T.transpose(self.v ** 2)), axis=1)
+            y_hat = T.addbroadcast(self.w0,0) + S.dot(X, self.w1) + interactions
+        else:
+            interactions = 0.5 * T.sum((T.dot(X, T.transpose(self.v)) ** 2) - \
+                                       T.dot(X ** 2, T.transpose(self.v ** 2)), axis=1)
+            y_hat = T.addbroadcast(self.w0,0) + T.dot(X, self.w1) + interactions
         if self.classifier:
             y_hat = T.nnet.sigmoid(y_hat)
 
@@ -126,8 +136,8 @@ class _FactorizationMachine(object):
                 min_loss = current_loss
                 min_loss_weights = self.get_weights()
             if verbose:
-                print 'Epoch {}/{}'.format(i+1, nb_epoch)
-                print ' loss: {}, min_loss: {}'.format(current_loss, min_loss)
+                print('Epoch {}/{}'.format(i+1, nb_epoch))
+                print(' loss: {}, min_loss: {}'.format(current_loss, min_loss))
         self.set_weights(min_loss_weights)
 
 
